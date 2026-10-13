@@ -56,6 +56,7 @@ describe("admin flag routes", () => {
     assert.equal(created.statusCode, 201);
     assert.equal(created.json<Flag>().enabled, true);
     assert.equal(created.json<Flag>().archivedAt, null);
+    assert.equal(created.json().stale, false);
 
     const duplicate = await app.inject({
       method: "POST",
@@ -78,6 +79,7 @@ describe("admin flag routes", () => {
       payload: { rolloutPercent: 60 },
     });
     assert.equal(updated.json<Flag>().rolloutPercent, 60);
+    assert.equal(updated.json().stale, false);
 
     const removed = await app.inject({ method: "DELETE", url: "/v1/admin/flags/checkout-v2" });
     assert.equal(removed.statusCode, 204);
@@ -125,7 +127,7 @@ describe("admin flag routes", () => {
     assert.match(error.details[0].message, /must be/);
   });
 
-  it("returns Fastify's status, code, and message for malformed JSON", async () => {
+  it("maps malformed JSON to our INVALID_JSON code and preserves Fastify's message", async () => {
     const response = await app.inject({
       method: "POST",
       url: "/v1/admin/flags",
@@ -134,8 +136,45 @@ describe("admin flag routes", () => {
     });
     const error = response.json().error;
     assert.equal(response.statusCode, 400);
-    assert.equal(error.code, "FST_ERR_CTP_INVALID_JSON_BODY");
+    assert.equal(error.code, "INVALID_JSON");
     assert.match(error.message, /JSON|Unexpected|property/i);
+  });
+
+  it("maps unsupported media types to our own error code", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/admin/flags",
+      headers: { "content-type": "application/xml" },
+      payload: "not json",
+    });
+    assert.equal(response.statusCode, 415, JSON.stringify(response.json()));
+    assert.equal(response.json().error.code, "UNSUPPORTED_MEDIA_TYPE");
+    assert.match(response.json().error.message, /unsupported media type/i);
+  });
+
+  it("maps other Fastify 4xx errors to BAD_REQUEST without leaking their code", async () => {
+    const teapot = Object.assign(new Error("I'm a teapot"), {
+      statusCode: 418,
+      code: "FST_ERR_EXAMPLE",
+    });
+    const failingStore: FlagStore = {
+      create: () => { throw teapot; },
+      get: () => undefined,
+      list: () => { throw teapot; },
+      update: () => undefined,
+      archive: () => undefined,
+    };
+    const errorApp = buildApp({ store: failingStore });
+    try {
+      const response = await errorApp.inject({ method: "GET", url: "/v1/admin/flags" });
+      assert.equal(response.statusCode, 418);
+      assert.deepEqual(response.json().error, {
+        code: "BAD_REQUEST",
+        message: "I'm a teapot",
+      });
+    } finally {
+      await errorApp.close();
+    }
   });
 
   it("rejects an expired flag on create and PATCH", async () => {

@@ -56,3 +56,9 @@ The server exposes these endpoints on port 4000:
 | `PATCH` | `/v1/admin/flags/:key` | Update mutable flag fields |
 | `DELETE` | `/v1/admin/flags/:key` | Archive a flag |
 | `POST` | `/v1/evaluate` | Evaluate all active flags for a context |
+
+Errors use `{ "error": { "code": "...", "message": "...", "details": [] } }`;
+`details` is included for validation errors and contains `{ field, message }` entries.
+Common codes include `VALIDATION_ERROR`, `INVALID_JSON`, `UNSUPPORTED_MEDIA_TYPE`,
+`BAD_REQUEST`, `NOT_FOUND`, `FLAG_EXISTS`, `FLAG_ARCHIVED`, `INVALID_EXPIRY`, and
+`INTERNAL_ERROR`.

@@ -60,9 +60,18 @@ export function buildApp({ store, logger = false }: BuildAppOptions) {
       });
     }
 
-    reply
-      .code(statusCode)
-      .send(errorBody(fastifyError.code ?? "CLIENT_ERROR", fastifyError.message));
+    if (statusCode >= 400 && statusCode < 500) {
+      const code =
+        fastifyError.code === "FST_ERR_CTP_INVALID_JSON" ||
+        fastifyError.code === "FST_ERR_CTP_INVALID_JSON_BODY"
+          ? "INVALID_JSON"
+          : fastifyError.code === "FST_ERR_CTP_INVALID_MEDIA_TYPE"
+            ? "UNSUPPORTED_MEDIA_TYPE"
+            : "BAD_REQUEST";
+      return reply.code(statusCode).send(errorBody(code, fastifyError.message));
+    }
+
+    reply.code(statusCode).send(errorBody("INTERNAL_ERROR", "Internal server error"));
   });
 
   app.setNotFoundHandler((_request, reply) => {
@@ -91,7 +100,7 @@ export function buildApp({ store, logger = false }: BuildAppOptions) {
             .send(errorBody("INVALID_EXPIRY", "expiresAt must be in the future"));
         }
         const flag = store.create(request.body);
-        return reply.code(201).send(flag);
+        return reply.code(201).send(withStale(flag));
       } catch (error) {
         if (error instanceof DuplicateFlagError) {
           const code = error.archived ? "FLAG_ARCHIVED" : "FLAG_EXISTS";
@@ -161,7 +170,7 @@ export function buildApp({ store, logger = false }: BuildAppOptions) {
       if (!flag) {
         return reply.code(404).send(errorBody("NOT_FOUND", "Flag not found"));
       }
-      return flag;
+      return withStale(flag);
     },
   );
 
