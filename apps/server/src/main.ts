@@ -1,15 +1,11 @@
-import Fastify from "fastify";
-import type { FlagSnapshot } from "@toggle-workflow/sdk";
+import { buildApp } from "./app.js";
+import { SQLiteFlagStore } from "./store.js";
 
-const app = Fastify({ logger: true });
-
-app.get("/healthz", async () => ({ ok: true }));
-
-// Phase 1 replaces this with real evaluation backed by a flag store.
-app.get("/v1/flags", async (): Promise<FlagSnapshot> => ({}));
+const store = new SQLiteFlagStore(process.env.DB_PATH ?? "./data/flags.db");
+const app = buildApp({ store, logger: true });
 
 const port = Number(process.env.PORT ?? 4000);
-app.listen({ port, host: "0.0.0.0" }).catch((err) => {
+app.listen({ port, host: "0.0.0.0" }).catch((err: Error) => {
   app.log.error(err);
   process.exit(1);
 });

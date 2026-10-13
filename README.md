@@ -44,3 +44,15 @@ pnpm install
 pnpm build
 pnpm dev        # admin on :3000, server on :4000
 ```
+
+The server exposes these endpoints on port 4000:
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `GET` | `/healthz` | Health check |
+| `POST` | `/v1/admin/flags` | Create a flag |
+| `GET` | `/v1/admin/flags` | List flags; `?includeArchived=true` includes archived flags |
+| `GET` | `/v1/admin/flags/:key` | Get a flag |
+| `PATCH` | `/v1/admin/flags/:key` | Update mutable flag fields |
+| `DELETE` | `/v1/admin/flags/:key` | Archive a flag |
+| `POST` | `/v1/evaluate` | Evaluate all active flags for a context |

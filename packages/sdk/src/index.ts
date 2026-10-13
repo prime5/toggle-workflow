@@ -2,10 +2,20 @@
 // means the same thing everywhere.
 export interface Flag {
   key: string;
-  enabled: boolean;
+  description: string;
   owner: string;
-  // Flags get a removal date at creation — cleanup is part of the flag's lifecycle.
-  expiresAt?: string;
+  expiresAt: string;
+  enabled: boolean;
+  rolloutPercent: number;
+  targetCustomers: string[];
+  createdAt: string;
+  updatedAt: string;
+  archivedAt: string | null;
+}
+
+export interface EvaluationContext {
+  userKey: string;
+  customerId?: string;
 }
 
 export type FlagSnapshot = Record<string, boolean>;

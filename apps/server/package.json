@@ -7,7 +7,8 @@
     "build": "tsc -p tsconfig.json",
     "dev": "node --watch dist/main.js",
     "start": "node dist/main.js",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "pnpm run build && node --test dist/app.test.js"
   },
   "dependencies": {
     "@toggle-workflow/sdk": "workspace:*",
