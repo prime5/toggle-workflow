@@ -1,0 +1,19 @@
+{
+  "name": "@toggle-workflow/server",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "node --watch dist/main.js",
+    "start": "node dist/main.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@toggle-workflow/sdk": "workspace:*",
+    "fastify": "5.12.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24"
+  }
+}
