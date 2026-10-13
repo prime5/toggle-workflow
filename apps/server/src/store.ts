@@ -26,9 +26,16 @@ export interface FlagStore {
 }
 
 export class DuplicateFlagError extends Error {
-  constructor(key: string) {
-    super(`Flag '${key}' already exists`);
+  readonly archived: boolean;
+
+  constructor(key: string, archived: boolean) {
+    super(
+      archived
+        ? `Flag '${key}' is archived and its key cannot be reused`
+        : `Flag '${key}' already exists`,
+    );
     this.name = "DuplicateFlagError";
+    this.archived = archived;
   }
 }
 
@@ -48,7 +55,7 @@ type FlagRow = {
 export class SQLiteFlagStore implements FlagStore {
   private readonly database: DatabaseSync;
 
-  constructor(path = process.env.DB_PATH ?? "./data/flags.db") {
+  constructor(path: string) {
     if (path !== ":memory:") {
       mkdirSync(dirname(resolve(path)), { recursive: true });
     }
@@ -71,8 +78,9 @@ export class SQLiteFlagStore implements FlagStore {
   }
 
   create(input: CreateFlagInput): Flag {
-    if (this.get(input.key)) {
-      throw new DuplicateFlagError(input.key);
+    const existing = this.get(input.key);
+    if (existing) {
+      throw new DuplicateFlagError(input.key, existing.archivedAt !== null);
     }
 
     const now = new Date().toISOString();

@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { after, describe, it } from "node:test";
 import type { EvaluationContext, Flag } from "@toggle-workflow/sdk";
 import { buildApp } from "./app.js";
 import { evaluate } from "./evaluate.js";
-import { SQLiteFlagStore } from "./store.js";
+import { registerShutdownHandlers } from "./shutdown.js";
+import { SQLiteFlagStore, type FlagStore } from "./store.js";
 
 function makeFlag(overrides: Partial<Flag> = {}): Flag {
   const now = new Date().toISOString();
@@ -22,14 +24,13 @@ function makeFlag(overrides: Partial<Flag> = {}): Flag {
   };
 }
 
-function createApp() {
-  const store = new SQLiteFlagStore(":memory:");
+function createApp(store: FlagStore = new SQLiteFlagStore(":memory:")) {
   const app = buildApp({ store });
   after(async () => {
     await app.close();
-    store.close();
+    if (store instanceof SQLiteFlagStore) store.close();
   });
-  return app;
+  return { app, store };
 }
 
 function createBody(overrides: Record<string, unknown> = {}) {
@@ -46,7 +47,9 @@ function createBody(overrides: Record<string, unknown> = {}) {
 }
 
 describe("admin flag routes", () => {
-  const app = createApp();
+  const { app } = createApp();
+  const staleStore = new SQLiteFlagStore(":memory:");
+  const { app: staleApp } = createApp(staleStore);
 
   it("creates, reads, lists, updates, and archives flags", async () => {
     const created = await app.inject({ method: "POST", url: "/v1/admin/flags", payload: createBody() });
@@ -108,6 +111,129 @@ describe("admin flag routes", () => {
     assert.equal(immutableKey.statusCode, 400);
   });
 
+  it("returns a validation detail for invalid requests", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/admin/flags",
+      payload: createBody({ rolloutPercent: 101 }),
+    });
+    const error = response.json().error;
+    assert.equal(response.statusCode, 400);
+    assert.equal(error.code, "VALIDATION_ERROR");
+    assert.ok(Array.isArray(error.details));
+    assert.equal(error.details[0].field, "/rolloutPercent");
+    assert.match(error.details[0].message, /must be/);
+  });
+
+  it("returns Fastify's status, code, and message for malformed JSON", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/admin/flags",
+      headers: { "content-type": "application/json" },
+      payload: "{invalid",
+    });
+    const error = response.json().error;
+    assert.equal(response.statusCode, 400);
+    assert.equal(error.code, "FST_ERR_CTP_INVALID_JSON_BODY");
+    assert.match(error.message, /JSON|Unexpected|property/i);
+  });
+
+  it("rejects an expired flag on create and PATCH", async () => {
+    const expired = "2000-01-01T00:00:00.000Z";
+    const createResponse = await app.inject({
+      method: "POST",
+      url: "/v1/admin/flags",
+      payload: createBody({ key: "expired-create", expiresAt: expired }),
+    });
+    assert.equal(createResponse.statusCode, 400);
+    assert.equal(createResponse.json().error.code, "INVALID_EXPIRY");
+
+    await app.inject({
+      method: "POST",
+      url: "/v1/admin/flags",
+      payload: createBody({ key: "expiry-patch" }),
+    });
+    const patchResponse = await app.inject({
+      method: "PATCH",
+      url: "/v1/admin/flags/expiry-patch",
+      payload: { expiresAt: expired },
+    });
+    assert.equal(patchResponse.statusCode, 400);
+    assert.equal(patchResponse.json().error.code, "INVALID_EXPIRY");
+  });
+
+  it("rejects PATCH for archived flags and prevents reusing archived keys", async () => {
+    await app.inject({ method: "POST", url: "/v1/admin/flags", payload: createBody() });
+    await app.inject({ method: "DELETE", url: "/v1/admin/flags/checkout-v2" });
+
+    const patchResponse = await app.inject({
+      method: "PATCH",
+      url: "/v1/admin/flags/checkout-v2",
+      payload: { enabled: true },
+    });
+    assert.equal(patchResponse.statusCode, 409);
+    assert.equal(patchResponse.json().error.code, "FLAG_ARCHIVED");
+
+    const createResponse = await app.inject({
+      method: "POST",
+      url: "/v1/admin/flags",
+      payload: createBody(),
+    });
+    assert.equal(createResponse.statusCode, 409);
+    assert.equal(createResponse.json().error.code, "FLAG_ARCHIVED");
+    assert.match(createResponse.json().error.message, /archived/i);
+  });
+
+  it("adds stale to GET and list responses for expired stored flags", async () => {
+    staleStore.create({
+      key: "old-flag",
+      description: "Old flag",
+      owner: "team",
+      expiresAt: "2000-01-01T00:00:00.000Z",
+    });
+
+    const fetched = await staleApp.inject({ method: "GET", url: "/v1/admin/flags/old-flag" });
+    const listed = await staleApp.inject({ method: "GET", url: "/v1/admin/flags" });
+    assert.equal(fetched.json().stale, true);
+    assert.equal(listed.json()[0].stale, true);
+  });
+
+  it("logs unexpected server errors and returns the generic 500 shape", async () => {
+    const failingStore: FlagStore = {
+      create: () => { throw new Error("database secret"); },
+      get: () => undefined,
+      list: () => { throw new Error("database secret"); },
+      update: () => undefined,
+      archive: () => undefined,
+    };
+    const loggerApp = buildApp({ store: failingStore, logger: true });
+    try {
+      const response = await loggerApp.inject({ method: "GET", url: "/v1/admin/flags" });
+      assert.equal(response.statusCode, 500);
+      assert.deepEqual(response.json().error, {
+        code: "INTERNAL_ERROR",
+        message: "Internal server error",
+      });
+    } finally {
+      await loggerApp.close();
+    }
+  });
+
+  it("rejects empty and duplicate target customer IDs", async () => {
+    for (const targetCustomers of [[""], ["customer-1", "customer-1"]]) {
+      const response = await app.inject({
+        method: "POST",
+        url: "/v1/admin/flags",
+        payload: createBody({
+          key: `target-${targetCustomers.length}-${targetCustomers[0] || "empty"}`,
+          targetCustomers,
+        }),
+      });
+      assert.equal(response.statusCode, 400);
+      assert.equal(response.json().error.code, "VALIDATION_ERROR");
+    }
+  });
+
   it("defaults new flags to dark with zero rollout and no customer targets", async () => {
     const response = await app.inject({
       method: "POST",
@@ -128,7 +254,7 @@ describe("admin flag routes", () => {
 });
 
 describe("evaluation routes", () => {
-  const app = createApp();
+  const { app } = createApp();
 
   it("omits archived flags from listing and evaluation", async () => {
     await app.inject({ method: "POST", url: "/v1/admin/flags", payload: createBody() });
@@ -158,6 +284,16 @@ describe("evaluation routes", () => {
     assert.equal(response.statusCode, 400);
     assert.equal(response.json().error.code, "VALIDATION_ERROR");
   });
+
+  it("rejects an empty customerId", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/evaluate",
+      payload: { context: { userKey: "user-1", customerId: "" } },
+    });
+    assert.equal(response.statusCode, 400);
+    assert.equal(response.json().error.code, "VALIDATION_ERROR");
+  });
 });
 
 describe("flag evaluation", () => {
@@ -175,11 +311,6 @@ describe("flag evaluation", () => {
     const flag = makeFlag({ rolloutPercent: 0, targetCustomers: ["priority-customer"] });
     assert.equal(evaluate(flag, { userKey: "user-1", customerId: "priority-customer" }), true);
     assert.equal(evaluate(flag, { userKey: "user-2", customerId: "other-customer" }), false);
-  });
-
-  it("matches an explicitly supplied empty customer ID", () => {
-    const flag = makeFlag({ rolloutPercent: 0, targetCustomers: [""] });
-    assert.equal(evaluate(flag, { userKey: "user-1", customerId: "" }), true);
   });
 
   it("returns the same result for the same flag and user", () => {
@@ -208,5 +339,37 @@ describe("flag evaluation", () => {
     }
     const percentage = (differingUsers / 10_000) * 100;
     assert.ok(percentage >= 45 && percentage <= 55, `${percentage}% differ`);
+  });
+});
+
+describe("server shutdown", () => {
+  it("closes the app and store on SIGINT or SIGTERM exactly once", async () => {
+    const signals = new EventEmitter();
+    let appCloseCount = 0;
+    let storeCloseCount = 0;
+    let resolveClosed!: () => void;
+    const closed = new Promise<void>((resolve) => {
+      resolveClosed = resolve;
+    });
+    registerShutdownHandlers(
+      {
+        close: async () => {
+          appCloseCount += 1;
+        },
+      },
+      () => {
+        storeCloseCount += 1;
+        resolveClosed();
+      },
+      signals,
+    );
+
+    signals.emit("SIGTERM");
+    await closed;
+    signals.emit("SIGINT");
+    await Promise.resolve();
+
+    assert.equal(appCloseCount, 1);
+    assert.equal(storeCloseCount, 1);
   });
 });

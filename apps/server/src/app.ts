@@ -8,6 +8,8 @@ interface BuildAppOptions {
   logger?: boolean;
 }
 
+type AdminFlag = Flag & { stale: boolean };
+
 const keySchema = { type: "string", pattern: "^[a-z0-9][a-z0-9-]{1,62}$" } as const;
 const expiresAtSchema = { type: "string", format: "date-time" } as const;
 const mutableProperties = {
@@ -16,7 +18,11 @@ const mutableProperties = {
   expiresAt: expiresAtSchema,
   enabled: { type: "boolean" },
   rolloutPercent: { type: "integer", minimum: 0, maximum: 100 },
-  targetCustomers: { type: "array", items: { type: "string" } },
+  targetCustomers: {
+    type: "array",
+    uniqueItems: true,
+    items: { type: "string", minLength: 1 },
+  },
 } as const;
 
 function errorBody(code: string, message: string) {
@@ -26,20 +32,37 @@ function errorBody(code: string, message: string) {
 export function buildApp({ store, logger = false }: BuildAppOptions) {
   const app = Fastify({ logger, ajv: { customOptions: { removeAdditional: false } } });
 
-  app.setErrorHandler((error, _request, reply) => {
-    const details = error as { validation?: unknown; statusCode?: number };
-    const statusCode = details.validation ? 400 : details.statusCode ?? 500;
-    const code = details.validation
-      ? "VALIDATION_ERROR"
-      : statusCode === 404
-        ? "NOT_FOUND"
-        : "INTERNAL_ERROR";
-    const message = details.validation
-      ? "Request validation failed"
-      : statusCode === 404
-        ? "Route not found"
-        : "Internal server error";
-    reply.code(statusCode).send(errorBody(code, message));
+  app.setErrorHandler((error, request, reply) => {
+    const fastifyError = error as {
+      code?: string;
+      message: string;
+      statusCode?: number;
+      validation?: Array<{ instancePath?: string; message?: string }>;
+    };
+    const statusCode = fastifyError.statusCode ?? 500;
+
+    if (statusCode >= 500) {
+      request.log.error(error);
+      return reply.code(statusCode).send(errorBody("INTERNAL_ERROR", "Internal server error"));
+    }
+
+    if (fastifyError.validation) {
+      const details = fastifyError.validation.map(({ instancePath, message }) => ({
+        field: instancePath ?? "",
+        message: message ?? "Invalid value",
+      }));
+      return reply.code(400).send({
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "Request validation failed",
+          details,
+        },
+      });
+    }
+
+    reply
+      .code(statusCode)
+      .send(errorBody(fastifyError.code ?? "CLIENT_ERROR", fastifyError.message));
   });
 
   app.setNotFoundHandler((_request, reply) => {
@@ -62,11 +85,17 @@ export function buildApp({ store, logger = false }: BuildAppOptions) {
     },
     async (request, reply) => {
       try {
+        if (new Date(request.body.expiresAt).getTime() < Date.now()) {
+          return reply
+            .code(400)
+            .send(errorBody("INVALID_EXPIRY", "expiresAt must be in the future"));
+        }
         const flag = store.create(request.body);
         return reply.code(201).send(flag);
       } catch (error) {
         if (error instanceof DuplicateFlagError) {
-          return reply.code(409).send(errorBody("FLAG_EXISTS", error.message));
+          const code = error.archived ? "FLAG_ARCHIVED" : "FLAG_EXISTS";
+          return reply.code(409).send(errorBody(code, error.message));
         }
         throw error;
       }
@@ -84,7 +113,8 @@ export function buildApp({ store, logger = false }: BuildAppOptions) {
         },
       },
     },
-    async (request): Promise<Flag[]> => store.list(request.query.includeArchived ?? false),
+    async (request): Promise<AdminFlag[]> =>
+      store.list(request.query.includeArchived ?? false).map(withStale),
   );
 
   app.get<{ Params: { key: string } }>(
@@ -95,7 +125,7 @@ export function buildApp({ store, logger = false }: BuildAppOptions) {
       if (!flag) {
         return reply.code(404).send(errorBody("NOT_FOUND", "Flag not found"));
       }
-      return flag;
+      return withStale(flag);
     },
   );
 
@@ -113,6 +143,20 @@ export function buildApp({ store, logger = false }: BuildAppOptions) {
       },
     },
     async (request, reply) => {
+      const current = store.get(request.params.key);
+      if (!current) {
+        return reply.code(404).send(errorBody("NOT_FOUND", "Flag not found"));
+      }
+      if (current.archivedAt !== null) {
+        return reply
+          .code(409)
+          .send(errorBody("FLAG_ARCHIVED", "Archived flags cannot be updated"));
+      }
+      if (request.body.expiresAt && new Date(request.body.expiresAt).getTime() < Date.now()) {
+        return reply
+          .code(400)
+          .send(errorBody("INVALID_EXPIRY", "expiresAt must be in the future"));
+      }
       const flag = store.update(request.params.key, request.body);
       if (!flag) {
         return reply.code(404).send(errorBody("NOT_FOUND", "Flag not found"));
@@ -148,7 +192,7 @@ export function buildApp({ store, logger = false }: BuildAppOptions) {
               required: ["userKey"],
               properties: {
                 userKey: { type: "string", minLength: 1 },
-                customerId: { type: "string" },
+                customerId: { type: "string", minLength: 1 },
               },
             },
           },
@@ -165,4 +209,8 @@ export function buildApp({ store, logger = false }: BuildAppOptions) {
   );
 
   return app;
+}
+
+function withStale(flag: Flag): AdminFlag {
+  return { ...flag, stale: new Date(flag.expiresAt).getTime() < Date.now() };
 }
