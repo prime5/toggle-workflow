@@ -21,6 +21,7 @@ Do **one step per session**. The person will tell you which step.
 - [ ] 1.3 Admin console + demo app
 - [ ] 2 PR linking
 - [ ] 3 Preview links
+- [ ] 3b Microfrontends
 - [ ] 4 Merge gate
 - [ ] 5 Commit trace
 
@@ -43,9 +44,10 @@ Then the SDK:
 - **Last-known values:** keep the last good snapshot in memory and in `localStorage` when it's available (wrap in try/catch). On startup, serve the stored snapshot immediately, then refresh.
 - **Circuit breaker** (write it, ~60 lines, no library): closed → open after 3 consecutive failures/timeouts; open serves last-known values and skips requests for a cooldown (start 5s, double up to 60s); half-open sends one probe; success → closed. Expose `client.status(): "live" | "cached" | "degraded"` for debugging.
 - Polling for now. (Server-sent events are a later improvement: leave a comment, don't build.)
+- **One client per page, even across microfrontends** (needed by step 3b). Two separately bundled apps on one page must not each poll, cache and run a breaker: mid-rollout or with one breaker open, parts of the page would disagree. `createFlagClient` registers the client on `globalThis` under a versioned key (`Symbol.for("toggle-workflow.sdk.v1")`, keyed by `baseUrl` + `userKey`) and returns the existing one if present; `close()` removes it. React `useFlag` reads that shared client.
 - React entry (`@toggle-workflow/sdk/react`): `<FlagProvider client>` and `useFlag(key): boolean`, built on `useSyncExternalStore`.
 - Package exports: `.` (core, no React) and `./react`. React is a peer dependency.
-- Tests (vitest; jsdom where needed): fallback to cached values when fetch fails, breaker transitions with fake timers (closed → open → half-open → closed), timeout counts as failure, `useFlag` re-renders on change, localStorage unavailable doesn't crash.
+- Tests (vitest; jsdom where needed): fallback to cached values when fetch fails, breaker transitions with fake timers (closed → open → half-open → closed), timeout counts as failure, `useFlag` re-renders on change, localStorage unavailable doesn't crash, two independently imported copies of the SDK share one client (one fetch per poll).
 - Pre-approved deps: `react` and `react-dom` (peer + dev), `vitest`, `jsdom`, `@testing-library/react`.
 
 ### 1.3 Admin console (`apps/admin`) + demo app (`apps/demo`)
@@ -87,6 +89,21 @@ Goal: "preview this feature" is a link. No per-PR environments: `main` is deploy
 - Demo app reads `?preview=<token>`, stores it in a session cookie, and the SDK sends it with `/v1/evaluate`. Server verifies signature and expiry, applies overrides on top of normal evaluation, and the response marks overridden keys.
 - Visible banner in the demo while a preview is active, with "exit preview".
 - Tests: valid token applies; expired, tampered, or unknown-flag tokens are ignored (normal evaluation, no error to the end user); plain query param does nothing.
+
+## Phase 3b: microfrontends
+
+Goal: the platform works for an app split into independently deployed parts, and a flag can decide which part serves a page. This is the case where flags matter most: parts ship at different times, so the flag, not the deploy, has to decide what users see.
+
+**Approach: Next.js Multi-Zones**, not Module Federation. Zones are page/path-level, officially documented for Next.js 16 (read `docs/01-app/02-guides/multi-zones.md` in the installed `next`), and served from one domain, so the preview cookie and the shared SDK client work unchanged. Module Federation's App Router support could not be confirmed (10/14); don't use it. The admin console stays one app: one owner, no team-autonomy problem to solve.
+
+- **Split `apps/demo`** into a shell zone (`apps/demo`, `/`) and a checkout zone (`apps/demo-checkout`, `/checkout`, own `assetPrefix`). Cross-zone links are plain `<a>` (hard navigation); say so in the README.
+- **Flag-driven routing:** the shell's `proxy` evaluates `new-checkout` for the request and sends `/checkout` to the new checkout zone when on, the old checkout page when off. Default to rewrites where no flag decision is needed.
+- **Version skew guard:** a flag may declare `requiresZones: [{ zone, minBuild }]`. Each zone sends its zone name and build id with `/v1/evaluate` (SDK option). The server evaluates a flag as **off** for a request when a required zone has not reported a qualifying build, and the response says why (`reason: "ZONE_NOT_READY"`). So a flag can't be switched on ahead of the code that implements it.
+- **Consistency:** the proxy's routing decision and the SDK inside the zone must agree for the same user, including when the SDK is serving cached values. Decide and document which wins on disagreement.
+- Admin flag page: show required zones and each zone's last reported build.
+- Tests: proxy routes by flag state; proxy and in-zone SDK agree for the same `userKey`; a flag with an unready zone evaluates off with `ZONE_NOT_READY`; a preview token works across both zones; two zones on one page share one SDK client.
+- `pnpm dev` adds the checkout zone on 3002.
+- Leave a comment, don't build: phase 4's matrix gains a per-zone dimension, and phase 5 must distinguish "merged" from "deployed in its zone".
 
 ## Phase 4: merge gate
 

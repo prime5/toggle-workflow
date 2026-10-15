@@ -34,6 +34,7 @@ Each phase is complete and usable on its own.
 1. **Flag service** — server, SDK with React hook, admin UI.
 2. **PR linking** — GitHub App; flags show their PRs via code references and labels.
 3. **Preview links** — override-based previews from a flag's page.
+   - **3b. Microfrontends** — flags decide which zone serves a page, and a flag can't turn on before its zone ships.
 4. **Merge gate** — flag-off / flag-on checks per PR, then a merge queue.
 5. **Commit trace** — per-flag health timeline and flag-scoped bisect.
 
