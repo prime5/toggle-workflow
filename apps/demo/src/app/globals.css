@@ -1,0 +1,138 @@
+:root {
+  --bg: #f6f4ef;
+  --surface: #ffffff;
+  --text: #1f2a24;
+  --muted: #6b7569;
+  --border: #e2ddd2;
+  --brand: #2f5d46;
+  --new: #b4531c;
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+.shop {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 40px 16px;
+  display: grid;
+  gap: 20px;
+}
+
+h1 {
+  margin: 0 0 4px;
+  color: var(--brand);
+}
+
+h2 {
+  margin: 0 0 12px;
+  font-size: 1.1rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.muted {
+  color: var(--muted);
+  margin: 0;
+}
+
+.cart,
+.checkout {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px;
+}
+
+.cart ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.cart li,
+.total {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+}
+
+.total {
+  border-top: 1px solid var(--border);
+  margin: 8px 0 0;
+  padding-top: 12px;
+}
+
+.checkout {
+  display: grid;
+  gap: 12px;
+}
+
+.checkout.new {
+  border: 2px solid var(--new);
+}
+
+.checkout label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.9rem;
+}
+
+.checkout input {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+}
+
+.checkout dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 16px;
+  margin: 0;
+}
+
+.checkout dt {
+  color: var(--muted);
+}
+
+.checkout dd {
+  margin: 0;
+}
+
+button {
+  justify-self: start;
+  padding: 10px 16px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font: inherit;
+  cursor: pointer;
+}
+
+button.primary {
+  background: var(--new);
+  border-color: var(--new);
+  color: white;
+  font-weight: 600;
+}
+
+.tag {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: white;
+  background: var(--new);
+  border-radius: 999px;
+  padding: 2px 8px;
+}

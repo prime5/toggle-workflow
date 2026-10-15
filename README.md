@@ -26,6 +26,7 @@ Limitation: code outside a flag check (shared refactors, changed utilities) runs
 | `apps/admin` | Admin UI: create flags, rollout %, targeting, kill switch, a flag's PRs and preview link | Next.js, React, TypeScript |
 | `apps/server` | Flag evaluation API, pushes changes to clients | Node, Fastify |
 | `packages/sdk` | Client SDK and shared types: `useFlag` hook, local cache, last-known-value fallback, circuit breaker | TypeScript |
+| `apps/demo` | Demo shop whose checkout is behind `new-checkout`; the test subject for phases 3–5 | Next.js, React |
 
 ## Roadmap
 
@@ -43,8 +44,19 @@ Each phase is complete and usable on its own.
 ```sh
 pnpm install
 pnpm build
-pnpm dev        # admin on :3000, server on :4000
+pnpm dev        # server on :4000, admin on :3000, demo shop on :3001
 ```
+
+Try it: in the admin console create `new-checkout` with rollout 100%, open the shop at
+http://localhost:3001, then turn the flag on and off from the admin. The shop switches
+checkout within a few seconds, without a reload.
+
+| Admin: flags, stale badge, kill switch | Demo shop with `new-checkout` on |
+|---|---|
+| ![Flag list](docs/images/admin-flags.png) | ![Demo shop](docs/images/demo-new-checkout.png) |
+
+- **Admin** (`apps/admin`) calls the flag server from the server side only (Server Components and Server Actions), at `FLAG_SERVER_URL` (default `http://localhost:4000`). The browser never talks to the flag server, so the admin token added in phase 2 stays server-side.
+- **Demo** (`apps/demo`) evaluates flags in the browser through a same-origin rewrite: `/flags/v1/evaluate` on the demo is forwarded to `FLAG_SERVER_URL`. Only that endpoint is forwarded, so the admin API is not reachable through the shop, and no CORS is needed. The flag client is created in the browser only; server rendering shows flags off, so a visitor with a flag on sees the old UI until the client loads (instant on repeat visits, from the stored snapshot).
 
 The server exposes these endpoints on port 4000:
 
@@ -59,7 +71,8 @@ The server exposes these endpoints on port 4000:
 | `POST` | `/v1/evaluate` | Evaluate all active flags for a context |
 
 Errors use `{ "error": { "code": "...", "message": "...", "details": [] } }`;
-`details` is included for validation errors and contains `{ field, message }` entries.
+`details` lists every invalid field as `{ field, message }` (e.g. `/owner`), for validation
+errors and `INVALID_EXPIRY`.
 Common codes include `VALIDATION_ERROR`, `INVALID_JSON`, `UNSUPPORTED_MEDIA_TYPE`,
 `BAD_REQUEST`, `NOT_FOUND`, `FLAG_EXISTS`, `FLAG_ARCHIVED`, `INVALID_EXPIRY`, and
 `INTERNAL_ERROR`.
