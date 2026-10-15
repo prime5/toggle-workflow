@@ -30,14 +30,19 @@ function errorBody(code: string, message: string) {
 }
 
 export function buildApp({ store, logger = false }: BuildAppOptions) {
-  const app = Fastify({ logger, ajv: { customOptions: { removeAdditional: false } } });
+  const app = Fastify({
+    logger,
+    // allErrors: report every invalid field at once so a form can mark them all.
+    // Bodies are small and the admin API gets auth in phase 2.
+    ajv: { customOptions: { removeAdditional: false, allErrors: true } },
+  });
 
   app.setErrorHandler((error, request, reply) => {
     const fastifyError = error as {
       code?: string;
       message: string;
       statusCode?: number;
-      validation?: Array<{ instancePath?: string; message?: string }>;
+      validation?: Array<{ instancePath?: string; message?: string; params?: { missingProperty?: string } }>;
     };
     const statusCode = fastifyError.statusCode ?? 500;
 
@@ -47,8 +52,9 @@ export function buildApp({ store, logger = false }: BuildAppOptions) {
     }
 
     if (fastifyError.validation) {
-      const details = fastifyError.validation.map(({ instancePath, message }) => ({
-        field: instancePath ?? "",
+      const details = fastifyError.validation.map(({ instancePath, message, params }) => ({
+        // A missing property is reported on its parent; point at the property itself.
+        field: params?.missingProperty ? `${instancePath ?? ""}/${params.missingProperty}` : (instancePath ?? ""),
         message: message ?? "Invalid value",
       }));
       return reply.code(400).send({
@@ -97,7 +103,7 @@ export function buildApp({ store, logger = false }: BuildAppOptions) {
         if (new Date(request.body.expiresAt).getTime() < Date.now()) {
           return reply
             .code(400)
-            .send(errorBody("INVALID_EXPIRY", "expiresAt must be in the future"));
+            .send(expiryError());
         }
         const flag = store.create(request.body);
         return reply.code(201).send(withStale(flag));
@@ -164,7 +170,7 @@ export function buildApp({ store, logger = false }: BuildAppOptions) {
       if (request.body.expiresAt && new Date(request.body.expiresAt).getTime() < Date.now()) {
         return reply
           .code(400)
-          .send(errorBody("INVALID_EXPIRY", "expiresAt must be in the future"));
+          .send(expiryError());
       }
       const flag = store.update(request.params.key, request.body);
       if (!flag) {
@@ -218,6 +224,11 @@ export function buildApp({ store, logger = false }: BuildAppOptions) {
   );
 
   return app;
+}
+
+function expiryError() {
+  const message = "expiresAt must be in the future";
+  return { error: { code: "INVALID_EXPIRY", message, details: [{ field: "/expiresAt", message }] } };
 }
 
 function withStale(flag: Flag): AdminFlag {

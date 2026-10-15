@@ -3,7 +3,11 @@ import type { FlagClient } from "./client.js";
 
 const FlagContext = createContext<FlagClient | null>(null);
 
-export function FlagProvider({ client, children }: { client: FlagClient; children?: ReactNode }) {
+/**
+ * `client` may be null, e.g. before a browser-only client is created after
+ * hydration. Flags read as false until it arrives, without remounting children.
+ */
+export function FlagProvider({ client, children }: { client: FlagClient | null; children?: ReactNode }) {
   return <FlagContext.Provider value={client}>{children}</FlagContext.Provider>;
 }
 

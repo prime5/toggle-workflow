@@ -127,6 +127,28 @@ describe("admin flag routes", () => {
     assert.match(error.details[0].message, /must be/);
   });
 
+  it("reports every invalid field, with missing properties named", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/admin/flags",
+      payload: { key: "Bad Key", rolloutPercent: 101 },
+    });
+    const fields = response.json().error.details.map((d: { field: string }) => d.field).sort();
+    assert.equal(response.statusCode, 400);
+    assert.deepEqual(fields, ["/description", "/expiresAt", "/key", "/owner", "/rolloutPercent"]);
+  });
+
+  it("points INVALID_EXPIRY at the expiresAt field", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/admin/flags",
+      payload: createBody({ key: "past-expiry", expiresAt: "2020-01-01T00:00:00.000Z" }),
+    });
+    const error = response.json().error;
+    assert.equal(error.code, "INVALID_EXPIRY");
+    assert.deepEqual(error.details, [{ field: "/expiresAt", message: "expiresAt must be in the future" }]);
+  });
+
   it("maps malformed JSON to our INVALID_JSON code and preserves Fastify's message", async () => {
     const response = await app.inject({
       method: "POST",

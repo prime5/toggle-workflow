@@ -53,6 +53,25 @@ describe("useFlag", () => {
     client.close();
   });
 
+  it("accepts a null client and picks up a client provided later", async () => {
+    const { fetch } = scriptedFetch({ "new-checkout": true });
+    const view = render(
+      <FlagProvider client={null}>
+        <Checkout />
+      </FlagProvider>,
+    );
+    expect(screen.getByText("old checkout")).toBeTruthy();
+    const client = createFlagClient({ ...base, fetch });
+    view.rerender(
+      <FlagProvider client={client}>
+        <Checkout />
+      </FlagProvider>,
+    );
+    await tick(0);
+    expect(screen.getByText("new checkout")).toBeTruthy();
+    client.close();
+  });
+
   it("returns false without a provider instead of throwing", () => {
     render(<Checkout />);
     expect(screen.getByText("old checkout")).toBeTruthy();
