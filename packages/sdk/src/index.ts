@@ -19,3 +19,7 @@ export interface EvaluationContext {
 }
 
 export type FlagSnapshot = Record<string, boolean>;
+
+export { createFlagClient } from "./client.js";
+export type { ClientStatus, FlagClient, FlagClientOptions } from "./client.js";
+export type { BreakerState } from "./breaker.js";

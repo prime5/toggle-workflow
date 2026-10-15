@@ -63,3 +63,29 @@ Errors use `{ "error": { "code": "...", "message": "...", "details": [] } }`;
 Common codes include `VALIDATION_ERROR`, `INVALID_JSON`, `UNSUPPORTED_MEDIA_TYPE`,
 `BAD_REQUEST`, `NOT_FOUND`, `FLAG_EXISTS`, `FLAG_ARCHIVED`, `INVALID_EXPIRY`, and
 `INTERNAL_ERROR`.
+
+## SDK
+
+```ts
+import { createFlagClient } from "@toggle-workflow/sdk";
+import { FlagProvider, useFlag } from "@toggle-workflow/sdk/react";
+
+const client = createFlagClient({
+  baseUrl: "http://localhost:4000",
+  context: { userKey: "user-123", customerId: "acme" },
+  // pollIntervalMs: 30000, timeoutMs: 2000, fetch
+});
+
+client.isEnabled("new-checkout"); // synchronous; unknown flags are false
+
+function Checkout() {
+  return useFlag("new-checkout") ? <NewCheckout /> : <OldCheckout />;
+}
+// <FlagProvider client={client}><Checkout /></FlagProvider>
+```
+
+- **Never throws, never blocks rendering.** Values are read from memory; network, timeout and storage errors are absorbed.
+- **Last-known values.** The last good snapshot is kept in memory and `localStorage` (when available) and served on the next startup before the first response.
+- **Circuit breaker.** 3 consecutive failures or timeouts open it; while open no requests are sent; after a cooldown (5s, doubling to 60s per failed probe) one probe is sent; success closes it. `client.status()` is `"live"`, `"cached"` or `"degraded"`.
+- **One client per page.** Calls with the same `baseUrl` and context share one client, even across separately bundled copies of the SDK (microfrontends). `close()` releases a handle; polling stops when the last one closes.
+- `@toggle-workflow/sdk` has no React dependency; `@toggle-workflow/sdk/react` needs React 19.

@@ -17,7 +17,7 @@ Do **one step per session**. The person will tell you which step.
 ## Status
 
 - [x] **1.1 Flag server**: CRUD, evaluation, validation, archive, stale, shutdown. Done (commits 4898502, 2d95c2c).
-- [ ] 1.2 SDK
+- [x] **1.2 SDK**: client, last-known values, circuit breaker, shared client, React hook.
 - [ ] 1.3 Admin console + demo app
 - [ ] 2 PR linking
 - [ ] 3 Preview links
