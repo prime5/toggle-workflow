@@ -89,3 +89,7 @@ function Checkout() {
 - **Circuit breaker.** 3 consecutive failures or timeouts open it; while open no requests are sent; after a cooldown (5s, doubling to 60s per failed probe) one probe is sent; success closes it. `client.status()` is `"live"`, `"cached"` or `"degraded"`.
 - **One client per page.** Calls with the same `baseUrl` and context share one client, even across separately bundled copies of the SDK (microfrontends). `close()` releases a handle; polling stops when the last one closes.
 - `@toggle-workflow/sdk` has no React dependency; `@toggle-workflow/sdk/react` needs React 19.
+
+## License
+
+Copyright (c) 2026 Pramathesh Malshe. All rights reserved. Public for reading and evaluation only; see [LICENSE](LICENSE).
